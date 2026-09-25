@@ -1,0 +1,59 @@
+services:
+  movie-service:
+    build: ./movie-service
+    image: c8n.io/roxane451/movie-service:latest
+    container_name: movie-service
+    expose:
+      - 8000
+    environment:
+      - DATABASE_URI=postgresql://movie_db_username:movie_db_password@movie_db/movie_db_dev
+    depends_on:
+      - movie_db
+
+  movie_db:
+    image: postgres:12.1-alpine
+    container_name: movie_db
+    environment:
+      - POSTGRES_USER=movie_db_username
+      - POSTGRES_PASSWORD=movie_db_password
+      - POSTGRES_DB=movie_db_dev
+    volumes:
+      - postgres_data_movie:/var/lib/postgresql/data/
+
+  cast-service:
+    build: ./cast-service
+    image: c8n.io/roxane451/cast-service:latest
+    container_name: cast-service
+    expose:
+      - 8000
+    environment:
+      - DATABASE_URI=postgresql://cast_db_username:cast_db_password@cast_db/cast_db_dev
+    depends_on:
+      - cast_db
+
+  cast_db:
+    image: postgres:12.1-alpine
+    container_name: cast_db
+    environment:
+      - POSTGRES_USER=cast_db_username
+      - POSTGRES_PASSWORD=cast_db_password
+      - POSTGRES_DB=cast_db_dev
+    volumes:
+      - postgres_data_cast:/var/lib/postgresql/data/
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    image: c8n.io/roxane451/nginx:latest
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - movie-service
+      - cast-service
+
+volumes:
+  postgres_data_movie:
+  postgres_data_cast:

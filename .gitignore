@@ -1,0 +1,14 @@
+# Environnement local
+.env
+.venv/
+__pycache__/
+*.pyc
+
+# Artefacts de build
+*.tar
+*.tgz
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
