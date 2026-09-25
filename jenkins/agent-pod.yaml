@@ -1,0 +1,69 @@
+# Pod des agents Jenkins (plugin Kubernetes).
+# Un conteneur par outil, tous non root, sans élévation de privilèges.
+# Le conteneur "jnlp" (agent Jenkins) est ajouté automatiquement par le plugin.
+apiVersion: v1
+kind: Pod
+spec:
+  # Droits Helm limités aux namespaces dev, qa, staging et prod (k8s/jenkins-rbac.yaml)
+  serviceAccountName: jenkins-deployer
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  containers:
+    # Build d'images sans démon et sans root (stockage vfs, isolation chroot)
+    - name: podman
+      image: quay.io/podman/stable:v5
+      command: ["sleep"]
+      args: ["infinity"]
+      env:
+        - name: STORAGE_DRIVER
+          value: vfs
+        - name: BUILDAH_ISOLATION
+          value: chroot
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests: { cpu: 500m, memory: 1Gi }
+        limits: { cpu: "2", memory: 4Gi }
+      volumeMounts:
+        - name: containers-storage
+          mountPath: /home/podman/.local/share/containers
+
+    # Scan de vulnérabilités des images avant publication
+    - name: trivy
+      image: aquasec/trivy:0.70.0
+      command: ["sleep"]
+      args: ["infinity"]
+      env:
+        - name: TRIVY_CACHE_DIR
+          value: /tmp/trivy-cache
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+
+    # Lint et déploiement du chart
+    - name: helm
+      image: alpine/helm:3.18.6
+      command: ["sleep"]
+      args: ["infinity"]
+      env:
+        - name: HELM_CACHE_HOME
+          value: /tmp/helm/cache
+        - name: HELM_CONFIG_HOME
+          value: /tmp/helm/config
+        - name: HELM_DATA_HOME
+          value: /tmp/helm/data
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+
+  volumes:
+    - name: containers-storage
+      emptyDir:
+        sizeLimit: 10Gi
