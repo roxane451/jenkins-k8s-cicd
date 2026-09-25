@@ -1,0 +1,11 @@
+# Préproduction : configuration identique à la production, en plus petit
+services:
+  movie-service:
+    replicas: 2
+  cast-service:
+    replicas: 2
+
+ingress:
+  enabled: true
+  host: staging.example.com
+  tlsSecretName: movie-app-staging-tls

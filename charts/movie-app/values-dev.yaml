@@ -1,0 +1,3 @@
+# Environnement de développement : déploiement à chaque push sur develop
+ingress:
+  enabled: false

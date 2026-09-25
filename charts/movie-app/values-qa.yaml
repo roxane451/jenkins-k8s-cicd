@@ -1,0 +1,3 @@
+# Recette : même topologie que dev, validée après le déploiement dev
+ingress:
+  enabled: false

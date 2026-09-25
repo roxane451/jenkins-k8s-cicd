@@ -1,0 +1,68 @@
+# Valeurs communes. Chaque environnement les complète avec values-<env>.yaml.
+
+image:
+  # Registry et namespace des images applicatives, ex. c8n.io/roxane451
+  registry: ""
+  # Tag des images (fourni par le pipeline : <sha-court>-<build>)
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Secret de pull créé au préalable dans chaque namespace
+imagePullSecrets:
+  - name: regcred
+
+# Microservices applicatifs. Le nom de la clé est aussi le nom du Service
+# Kubernetes, utilisé par la passerelle Nginx.
+services:
+  movie-service:
+    replicas: 1
+    # Base PostgreSQL dédiée (clé de "databases")
+    database: movie-db
+    env:
+      CAST_SERVICE_HOST_URL: http://cast-service:8000/api/v1/casts/
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 256Mi }
+  cast-service:
+    replicas: 1
+    database: cast-db
+    env: {}
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 256Mi }
+
+# Une instance PostgreSQL par service (bases isolées).
+# Les identifiants viennent d'un Secret existant, jamais des values :
+#   kubectl create secret generic <secretName> -n <namespace> \
+#     --from-literal=username=... --from-literal=password=... --from-literal=database=...
+databases:
+  movie-db:
+    secretName: movie-db-credentials
+    storage: 1Gi
+  cast-db:
+    secretName: cast-db-credentials
+    storage: 1Gi
+
+postgres:
+  image: postgres:16-alpine
+  storageClassName: ""
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+gateway:
+  image: nginxinc/nginx-unprivileged:stable-alpine
+  replicas: 1
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+ingress:
+  enabled: false
+  className: traefik
+  host: ""
+  tlsSecretName: ""
+  annotations: {}
+
+networkPolicies:
+  enabled: true

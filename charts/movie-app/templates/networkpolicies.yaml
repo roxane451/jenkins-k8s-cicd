@@ -1,0 +1,70 @@
+{{- if .Values.networkPolicies.enabled }}
+# Tout trafic entrant est refusé par défaut dans le namespace...
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    {{- include "movie-app.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+# ...sauf vers la passerelle, point d'entrée unique (depuis l'ingress controller)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-gateway
+  labels:
+    {{- include "movie-app.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  policyTypes: ["Ingress"]
+  ingress:
+    - ports:
+        - port: 8080
+{{- range $name, $svc := .Values.services }}
+---
+# {{ $name }} : joignable depuis la passerelle et depuis les autres services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-{{ $name }}
+  labels:
+    {{- include "movie-app.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: {{ $.Chart.Name }}
+      ports:
+        - port: 8000
+---
+# {{ $svc.database }} : joignable uniquement par {{ $name }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-{{ $svc.database }}
+  labels:
+    {{- include "movie-app.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $svc.database }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $name }}
+      ports:
+        - port: 5432
+{{- end }}
+{{- end }}

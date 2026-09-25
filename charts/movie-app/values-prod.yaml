@@ -1,0 +1,20 @@
+# Production : déploiement après validation manuelle dans Jenkins
+services:
+  movie-service:
+    replicas: 3
+  cast-service:
+    replicas: 3
+
+databases:
+  movie-db:
+    storage: 10Gi
+  cast-db:
+    storage: 10Gi
+
+gateway:
+  replicas: 2
+
+ingress:
+  enabled: true
+  host: app.example.com
+  tlsSecretName: movie-app-prod-tls
