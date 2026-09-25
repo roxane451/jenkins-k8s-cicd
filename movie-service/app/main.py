@@ -1,18 +1,31 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+
+from app.api.db import database, engine, metadata
 from app.api.movies import movies
-from app.api.db import metadata, database, engine
 
 metadata.create_all(engine)
 
-app = FastAPI(openapi_url="/api/v1/movies/openapi.json", docs_url="/api/v1/movies/docs")
 
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(_: FastAPI):
     await database.connect()
-
-@app.on_event("shutdown")
-async def shutdown():
+    yield
     await database.disconnect()
 
 
-app.include_router(movies, prefix='/api/v1/movies', tags=['movies'])
+app = FastAPI(
+    lifespan=lifespan,
+    openapi_url="/api/v1/movies/openapi.json",
+    docs_url="/api/v1/movies/docs",
+)
+
+
+@app.get("/health", include_in_schema=False)
+async def health():
+    await database.fetch_val("SELECT 1")
+    return {"status": "ok"}
+
+
+app.include_router(movies, prefix="/api/v1/movies", tags=["movies"])
