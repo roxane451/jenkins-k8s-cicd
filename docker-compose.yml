@@ -1,59 +1,59 @@
+# Environnement local : docker compose up --build
+# puis http://localhost:8080/api/v1/movies/docs et /api/v1/casts/docs
+# Les identifiants par défaut ne servent qu'en local ; surcharger via un fichier .env.
+
 services:
   movie-service:
     build: ./movie-service
-    image: c8n.io/roxane451/movie-service:latest
-    container_name: movie-service
-    expose:
-      - 8000
     environment:
-      - DATABASE_URI=postgresql://movie_db_username:movie_db_password@movie_db/movie_db_dev
+      DATABASE_URI: postgresql://${MOVIE_DB_USER:-movie}:${MOVIE_DB_PASSWORD:-movie}@movie-db:5432/${MOVIE_DB_NAME:-movie_db}
+      CAST_SERVICE_HOST_URL: http://cast-service:8000/api/v1/casts/
     depends_on:
-      - movie_db
+      movie-db:
+        condition: service_healthy
 
-  movie_db:
-    image: postgres:12.1-alpine
-    container_name: movie_db
+  movie-db:
+    image: postgres:16-alpine
     environment:
-      - POSTGRES_USER=movie_db_username
-      - POSTGRES_PASSWORD=movie_db_password
-      - POSTGRES_DB=movie_db_dev
+      POSTGRES_USER: ${MOVIE_DB_USER:-movie}
+      POSTGRES_PASSWORD: ${MOVIE_DB_PASSWORD:-movie}
+      POSTGRES_DB: ${MOVIE_DB_NAME:-movie_db}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
     volumes:
-      - postgres_data_movie:/var/lib/postgresql/data/
+      - movie-db-data:/var/lib/postgresql/data
 
   cast-service:
     build: ./cast-service
-    image: c8n.io/roxane451/cast-service:latest
-    container_name: cast-service
-    expose:
-      - 8000
     environment:
-      - DATABASE_URI=postgresql://cast_db_username:cast_db_password@cast_db/cast_db_dev
+      DATABASE_URI: postgresql://${CAST_DB_USER:-cast}:${CAST_DB_PASSWORD:-cast}@cast-db:5432/${CAST_DB_NAME:-cast_db}
     depends_on:
-      - cast_db
+      cast-db:
+        condition: service_healthy
 
-  cast_db:
-    image: postgres:12.1-alpine
-    container_name: cast_db
+  cast-db:
+    image: postgres:16-alpine
     environment:
-      - POSTGRES_USER=cast_db_username
-      - POSTGRES_PASSWORD=cast_db_password
-      - POSTGRES_DB=cast_db_dev
+      POSTGRES_USER: ${CAST_DB_USER:-cast}
+      POSTGRES_PASSWORD: ${CAST_DB_PASSWORD:-cast}
+      POSTGRES_DB: ${CAST_DB_NAME:-cast_db}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
     volumes:
-      - postgres_data_cast:/var/lib/postgresql/data/
+      - cast-db-data:/var/lib/postgresql/data
 
-  nginx:
-    build:
-      context: .
-      dockerfile: Dockerfile.nginx
-    image: c8n.io/roxane451/nginx:latest
-    container_name: nginx
-    restart: unless-stopped
+  gateway:
+    build: ./nginx
     ports:
-      - "80:80"
+      - "8080:8080"
     depends_on:
       - movie-service
       - cast-service
 
 volumes:
-  postgres_data_movie:
-  postgres_data_cast:
+  movie-db-data:
+  cast-db-data:
