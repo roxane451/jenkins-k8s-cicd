@@ -1,0 +1,37 @@
+# Un namespace par environnement, plus celui de Jenkins
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jenkins
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    # Pod Security Standards : les pods non conformes au profil "restricted" sont refusés
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: qa
+  labels:
+    # Pod Security Standards : les pods non conformes au profil "restricted" sont refusés
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    # Pod Security Standards : les pods non conformes au profil "restricted" sont refusés
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+  labels:
+    # Pod Security Standards : les pods non conformes au profil "restricted" sont refusés
+    pod-security.kubernetes.io/enforce: restricted
