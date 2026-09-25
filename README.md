@@ -1,85 +1,128 @@
-# DevOps - Pipeline CI/CD avec Jenkins
+# jenkins-k8s-cicd
 
-## Contexte et Objectifs
-En tant qu’ingénieur **DevOps junior**, l’objectif est de mettre en place un **pipeline CI/CD complet** pour une application microservices.  
+Pipeline CI/CD **Jenkins** pour deux microservices FastAPI, de la construction des
+images au déploiement **Helm** sur quatre environnements Kubernetes, avec scan de
+vulnérabilités bloquant et validation manuelle avant la production.
 
-Le pipeline devra permettre :
-- La **construction** et le **push** des images vers une registry distante.  
-- Le **déploiement automatisé** sur différents environnements Kubernetes.
-- L’**orchestration CI/CD** à l’aide de **Jenkins**.  
-- Le **packaging et déploiement** avec **Helm Charts**.  
+## Pipeline
 
----
+```mermaid
+flowchart LR
+    G[push GitHub] --> L[Lint<br/>chart + config]
+    L --> B[Build<br/>Podman rootless]
+    B --> T[Scan Trivy<br/>bloquant]
+    T -->|develop / main| P[Push<br/>registry]
+    P -->|develop| D[dev] --> Q[qa]
+    P -->|main| S[staging] --> V{validation<br/>manuelle} --> PR[prod]
+```
 
-## Architecture Technique
+| Branche | Étapes |
+|---|---|
+| toutes | lint du chart pour les 4 environnements, build des images, scan Trivy |
+| `develop` | + push des images, déploiement **dev** puis **qa** |
+| `main` | + push des images, déploiement **staging**, validation manuelle, **prod** |
 
-### Technologies utilisées
-- **Conteneurisation** : [Podman](https://podman.io/)
-- **Orchestration Kubernetes** : Cluster Kubernetes (Rancher) 
-- **Registry d’images** : [c8n.io](https://c8n.io/)  
-- **CI/CD** : [Jenkins](https://www.jenkins.io/)  
-- **SCM** : [GitHub](https://github.com/)  
-- **Packaging & déploiement** : [Helm](https://helm.sh/)  
+- **Agents éphémères** : chaque build tourne dans un pod Kubernetes dédié
+  ([`jenkins/agent-pod.yaml`](jenkins/agent-pod.yaml)), un conteneur par outil
+  (Podman, Trivy, Helm), tous non root et sans élévation de privilèges.
+- **Images sans démon ni root** : build avec Podman rootless, sans socket Docker.
+- **Scan avant publication** : l'image est construite, exportée, scannée par Trivy,
+  et poussée seulement si aucune vulnérabilité HIGH/CRITICAL corrigeable n'est trouvée.
+- **Tags immuables** : `<commit>-<build>`, jamais `latest`. Le tag déployé est
+  toujours celui qui a été scanné.
+- **Déploiement atomique** : `helm upgrade --install --atomic` annule
+  automatiquement une release dont les pods ne deviennent pas prêts.
 
----
+## Application
 
-## Flux du Pipeline CI/CD
+```mermaid
+flowchart LR
+    I[Ingress] --> GW[gateway<br/>Nginx]
+    GW --> M[movie-service]
+    GW --> C[cast-service]
+    M -->|vérifie les casts| C
+    M --> MDB[(movie-db)]
+    C --> CDB[(cast-db)]
+```
 
-1. **Commit & Push GitHub**  
-   → Déclenchement automatique du pipeline Jenkins.  
+Deux API FastAPI, chacune avec sa propre base PostgreSQL, derrière une passerelle
+Nginx. `movie-service` vérifie auprès de `cast-service` que les acteurs référencés
+existent.
 
-2. **Build & Push d’images**  
-   - Construction des images avec **Podman**.  
-   - Publication vers la registry **c8n.io**.  
+## Chart Helm
 
-3. **Déploiement sur Kubernetes**  
-   - Déploiement de l’application dans l’environnement cible.  
-   - Utilisation de **Helm Charts** pour gérer les releases.  
+[`charts/movie-app`](charts/movie-app) déploie l'ensemble, avec un fichier de values
+par environnement :
 
-4. **Gestion des environnements**
-   - Namespaces Kubernetes séparés par environnement  
-   - Configuration spécifique par environnement
----
+| | dev | qa | staging | prod |
+|---|---|---|---|---|
+| Réplicas des API | 1 | 1 | 2 | 3 |
+| Stockage PostgreSQL | 1 Gi | 1 Gi | 1 Gi | 10 Gi |
+| Ingress TLS | — | — | ✅ | ✅ |
 
-## Sécurité et durcissement
+Le chart refuse de se déployer sans registry ni tag d'image (`required`), pour
+qu'aucun déploiement ne parte avec une image implicite.
 
-- Jenkins : utiliser des credentials Jenkins (username/password pour registry) et éviter toute exposition du mot de passe dans les logs.
-- Pipeline : ne pas exécuter en `root`, appliquer `runAsNonRoot`, `runAsUser: 1000`, `usePodSecurityContext` dans le pod Jenkins agent.
-- Conteneurs : `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]`.
-- Kubernetes : ne pas déployer en mode `NodePort` non protégé en production ; utiliser `Ingress` TLS.
-- Images : éviter `latest`, verrouiller version (tag explicite). Scanner avec Trivy/Anchore.
-- Secrets : utiliser `imagePullSecrets` et ne pas stocker DB_PASSWORD dans `docker-compose.yml` en clair.
+## Sécurité
 
-## Changelog de sécurité
+| Couche | Mesure |
+|---|---|
+| Namespaces | Pod Security Standards en mode `restricted` sur les 4 environnements |
+| Pods | non root, `readOnlyRootFilesystem`, capabilities supprimées, seccomp `RuntimeDefault`, pas de token de service monté |
+| Réseau | NetworkPolicies : tout refusé par défaut, passerelle seule exposée, chaque base joignable uniquement par son service |
+| Jenkins | ServiceAccount dédié, droits limités par `Role` aux 4 namespaces (aucun `ClusterRole`) |
+| Secrets | identifiants de base dans des Secrets Kubernetes créés hors du dépôt, jamais dans les values |
+| Images | scan Trivy bloquant, correctifs de sécurité appliqués au build, utilisateur non root |
 
-- 2026-04-03 : hardening critique
-  - `Jenkinsfile` : passage en `runAsNonRoot`, suppression de `privileged` et ajout de `allowPrivilegeEscalation: false` + `capabilities.drop: [ALL]`.
-  - `Jenkinsfile` : limité les déploiements DEV à `develop`, `main`, `master` (plus de “toutes branches”).
-  - `charts/values.yaml` : ajout `podSecurityContext`/`securityContext` durcis.
-  - `README.md` : ajout section sécurité et durcissement.
+## Mise en place
 
-## Arborescence du projet
+1. **Namespaces et RBAC** :
+   ```bash
+   kubectl apply -f k8s/namespaces.yaml -f k8s/jenkins-rbac.yaml
+   ```
+2. **Secrets dans chaque namespace** (`dev`, `qa`, `staging`, `prod`) :
+   ```bash
+   kubectl create secret docker-registry regcred -n dev \
+     --docker-server=c8n.io --docker-username=<user> --docker-password=<token>
+   kubectl create secret generic movie-db-credentials -n dev \
+     --from-literal=username=movie --from-literal=password=<mot-de-passe> --from-literal=database=movie_db
+   kubectl create secret generic cast-db-credentials -n dev \
+     --from-literal=username=cast --from-literal=password=<mot-de-passe> --from-literal=database=cast_db
+   ```
+3. **Jenkins** : plugins Kubernetes et Pipeline, un credential `c8n-registry`
+   (username/password), puis un job **Multibranch Pipeline** sur ce dépôt.
+4. Adapter `REGISTRY` et `IMAGE_NAMESPACE` dans le `Jenkinsfile`, et les hôtes
+   d'ingress dans `values-staging.yaml` / `values-prod.yaml`.
+
+## Développement local
 
 ```bash
-.
-├── cast-service
-│   ├── app
-│   ├── Dockerfile
-│   └── requirements.txt
-├── charts
-│   ├── Chart.yaml
-│   ├── namespaces.yaml
-│   ├── README.md
-│   ├── templates
-│   └── values.yaml
-├── docker-compose.yml
-├── Jenkinsfile
-├── movie-service
-│   ├── app
-│   ├── Dockerfile
-│   └── requirements.txt
-├── nginx
-│   ├── Dockerfile
-│   └── nginx.conf
-└── README.md
+docker compose up --build
+```
 
+- http://localhost:8080/api/v1/movies/docs
+- http://localhost:8080/api/v1/casts/docs
+
+## Structure
+
+```text
+.
+├── Jenkinsfile               # pipeline déclaratif
+├── jenkins/agent-pod.yaml    # pod des agents (Podman, Trivy, Helm)
+├── k8s/                      # namespaces et RBAC Jenkins
+├── charts/movie-app/         # chart Helm + values par environnement
+├── movie-service/            # API films (FastAPI)
+├── cast-service/             # API acteurs (FastAPI)
+├── nginx/                    # passerelle (image Docker pour compose)
+└── docker-compose.yml        # environnement local
+```
+
+La configuration Nginx existe en deux exemplaires (`nginx/` pour Docker Compose,
+`charts/movie-app/files/` pour Kubernetes) ; le pipeline vérifie qu'ils sont identiques.
+
+## Crédits
+
+Les deux microservices proviennent d'une application de démonstration utilisée comme
+support d'exercice ; ils ont été mis à jour (FastAPI, Pydantic 2, SQLAlchemy 2,
+Python 3.12) et corrigés. Le travail présenté ici porte sur la chaîne CI/CD et le
+déploiement.
